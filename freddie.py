@@ -7,7 +7,13 @@ import sys
 from tqdm import tqdm
 
 from freddie.ilp import IlpParams
-from freddie.isoforms import get_isoforms, Isoform, IsoformsParams
+from freddie.isoforms import (
+    get_isoforms,
+    get_problem_size,
+    Isoform,
+    IsoformsParams,
+    ProblemSize,
+)
 from freddie.split import FredSplit, FredSplitParams
 
 import pulp
@@ -69,6 +75,11 @@ def parse_args():
         "--generate-all-tints-first",
         action="store_true",
         help="Generate all transcriptional intervals first, then detect isoforms. Default is to detect isoforms as Tints are generated.",
+    )
+    parser.add_argument(
+        "--dry-run-problem-sizes",
+        action="store_true",
+        help="Only report per-tint ILP size estimates. Does not build or solve ILPs.",
     )
     parser.add_argument(
         "--contig-min-len",
@@ -165,26 +176,25 @@ def main():
         ),
         rname_to_celltypes=args.rname_to_celltypes,
     )
-    get_isoforms_f = functools.partial(
-        get_isoforms,
-        params=IsoformsParams(
-            max_isoform_count=args.max_isoform_count,
-            min_read_support=args.min_read_support,
-            ilp_params=IlpParams(
-                timeLimit=args.ilp_time_limit,
-                max_correction_len=args.max_correction_len,
-                max_correction_count=args.max_correction_count,
-                ilp_solver=args.ilp_solver,
-            ),
+    isoform_params = IsoformsParams(
+        max_isoform_count=args.max_isoform_count,
+        min_read_support=args.min_read_support,
+        ilp_params=IlpParams(
+            timeLimit=args.ilp_time_limit,
+            max_correction_len=args.max_correction_len,
+            max_correction_count=args.max_correction_count,
+            ilp_solver=args.ilp_solver,
         ),
     )
+    get_isoforms_f = functools.partial(get_isoforms, params=isoform_params)
+    get_problem_size_f = functools.partial(get_problem_size, params=isoform_params)
 
     all_isoforms: list[Isoform] = list()
     if args.output == "":
         outfile = sys.stdout
     else:
         outfile = open(args.output, "w+")
-    if args.readnames_output is not None:
+    if args.readnames_output is not None and not args.dry_run_problem_sizes:
         args.readnames_output = open(args.readnames_output, "w+")
     with Pool(args.threads) as pool:
         pbar_tint = tqdm(
@@ -200,20 +210,27 @@ def main():
         )
         tints = split.generate_all_tints(pbar_tint, pbar_reads)
         tints = list(tints) if args.generate_all_tints_first else tints
-        for tint, isoforms in pool.imap_unordered(get_isoforms_f, tints):
-            pbar_tint.update(1)
-            pbar_reads.update(len(tint.reads))
-            for isoform in isoforms:
-                if args.sort_output:
-                    all_isoforms.append(isoform)
-                else:
-                    print(isoform, file=outfile)
-                if args.readnames_output is not None:
-                    for read in isoform.reads:
-                        print(f"{isoform.iid}\t{read.name}", file=args.readnames_output)
+        if args.dry_run_problem_sizes:
+            print(ProblemSize.header(), file=outfile)
+            for problem_size in pool.imap_unordered(get_problem_size_f, tints):
+                pbar_tint.update(1)
+                pbar_reads.update(problem_size.read_count)
+                print(problem_size, file=outfile)
+        else:
+            for tint, isoforms in pool.imap_unordered(get_isoforms_f, tints):
+                pbar_tint.update(1)
+                pbar_reads.update(len(tint.reads))
+                for isoform in isoforms:
+                    if args.sort_output:
+                        all_isoforms.append(isoform)
+                    else:
+                        print(isoform, file=outfile)
+                    if args.readnames_output is not None:
+                        for read in isoform.reads:
+                            print(f"{isoform.iid}\t{read.name}", file=args.readnames_output)
         pbar_tint.close()
         pbar_reads.close()
-    if args.sort_output:
+    if args.sort_output and not args.dry_run_problem_sizes:
         all_isoforms.sort()
         for isoform in all_isoforms:
             print(isoform, file=outfile)

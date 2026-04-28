@@ -1,9 +1,10 @@
 import enum
 import functools
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import os
 import pickle
 
-from freddie.ilp import FredILP, IlpParams, UnsolvableILP, TimeoutILP
+from freddie.ilp import ALN_T_MAP, FredILP, IlpParams, UnsolvableILP, TimeoutILP
 from freddie.segment import CanonIntervals, PairedInterval, aln_t
 from freddie.split import Interval, Read, Tint
 
@@ -21,7 +22,7 @@ class IsoformsParams:
     max_isoform_count: int = 20
     min_read_support: int = 3
     timeout_stategy: timeoutStrat = timeoutStrat.stop
-    ilp_params: IlpParams = IlpParams()
+    ilp_params: IlpParams = field(default_factory=IlpParams)
 
     def __post_init__(self):
         assert 1 <= self.max_isoform_count
@@ -31,6 +32,32 @@ class IsoformsParams:
 @dataclass
 class IntervalSupport(Interval):
     support: float = 0.0
+
+
+@dataclass
+class ProblemSize:
+    contig: str
+    tint_id: int
+    read_count: int
+    canon_interval_count: int
+    matrix_rows: int
+    matrix_cols: int
+    unique_read_patterns: int
+    cell_type_count: int
+    row_cell_type_count: int
+    intronic_cell_count: int
+    intron_run_count: int
+    unique_intron_run_count: int
+    estimated_binary_vars: int
+    estimated_integer_vars: int
+    estimated_constraints: int
+
+    @staticmethod
+    def header() -> str:
+        return "\t".join(ProblemSize.__dataclass_fields__)
+
+    def __str__(self) -> str:
+        return "\t".join(str(getattr(self, field)) for field in self.__dataclass_fields__)
 
 
 @functools.total_ordering
@@ -200,13 +227,10 @@ def get_isoforms(
                 reads, params
             )
         except (UnsolvableILP, TimeoutILP) as e:
-            pickle.dump(
-                reads,
-                open(
-                    f"tints/{str(e).replace(' ', '')}.contig_{tint.contig}.tint_{tint.tid}.pickle",
-                    "wb+",
-                ),
-            )
+            os.makedirs("tints", exist_ok=True)
+            fname = f"tints/{str(e).replace(' ', '')}.contig_{tint.contig}.tint_{tint.tid}.pickle"
+            with open(fname, "wb+") as f:
+                pickle.dump(reads, f)
             break
         if len(isoform_bin) < params.min_read_support:
             break
@@ -262,6 +286,166 @@ def canonize_reads(reads):
     return canon_ints
 
 
+def get_problem_size(
+    tint: Tint,
+    params: IsoformsParams = IsoformsParams(),
+) -> ProblemSize:
+    """
+    Estimate the first ILP size for a Tint without building or solving the model.
+    """
+    canon_ints = canonize_reads(tint.reads)
+    rows, cell_types = _get_ilp_rows_and_cell_types(canon_ints, params.ilp_params)
+    matrix = canon_ints.get_matrix()
+    K = 2
+    M = len(canon_ints.intervals) + 2
+    N = len(rows)
+    cell_type_set = {cell_type for cts in cell_types for cell_type in cts}
+    J = len(cell_type_set)
+    row_cell_type_count = sum(len(cts) for cts in cell_types)
+    intronic_cell_count = sum(row.count(aln_t.intron) for row in rows)
+    intron_runs = [run for row in rows for run in _get_introns(row)]
+    intron_run_count = len(intron_runs)
+    unique_intron_run_count = len(set(intron_runs))
+
+    binary_vars = _estimate_binary_vars(
+        K=K,
+        M=M,
+        N=N,
+        J=J,
+        row_cell_type_count=row_cell_type_count,
+        intronic_cell_count=intronic_cell_count,
+    )
+    integer_vars = (K - 1) * (unique_intron_run_count + 1)
+    constraints = _estimate_constraints(
+        K=K,
+        M=M,
+        N=N,
+        J=J,
+        row_cell_type_count=row_cell_type_count,
+        intronic_cell_count=intronic_cell_count,
+        intron_run_count=intron_run_count,
+        unique_intron_run_count=unique_intron_run_count,
+    )
+
+    return ProblemSize(
+        contig=tint.contig,
+        tint_id=tint.tid,
+        read_count=len(tint.reads),
+        canon_interval_count=len(canon_ints.intervals),
+        matrix_rows=matrix.shape[0],
+        matrix_cols=matrix.shape[1],
+        unique_read_patterns=N,
+        cell_type_count=J,
+        row_cell_type_count=row_cell_type_count,
+        intronic_cell_count=intronic_cell_count,
+        intron_run_count=intron_run_count,
+        unique_intron_run_count=unique_intron_run_count,
+        estimated_binary_vars=binary_vars,
+        estimated_integer_vars=integer_vars,
+        estimated_constraints=constraints,
+    )
+
+
+def _get_ilp_rows_and_cell_types(
+    canon_ints: CanonIntervals,
+    params: IlpParams,
+) -> tuple[tuple[tuple[aln_t, ...], ...], tuple[tuple[str, ...], ...]]:
+    data: dict[tuple[tuple[aln_t, ...], tuple[str, ...]], None] = dict()
+    for idx, row in enumerate(canon_ints.get_matrix()):
+        if params.ignore_celltype:
+            cell_types = ("",)
+        else:
+            cell_types = canon_ints.reads[idx].cell_types
+        first = len(row) - 1
+        last = 0
+        for j, aln_type in enumerate(row):
+            if aln_type in [aln_t.exon, aln_t.polyA]:
+                first = min(first, j)
+                last = max(last, j)
+        assert first <= last
+        key = (
+            tuple(aln_t.unaln for _ in range(first))
+            + tuple(ALN_T_MAP[i] for i in row[first : last + 1])
+            + tuple(aln_t.unaln for _ in range(last + 1, len(row)))
+        ), cell_types
+        data[key] = None
+    keys = tuple(data.keys())
+    return tuple(r for r, _ in keys), tuple(cts for _, cts in keys)
+
+
+def _get_introns(row: tuple[aln_t, ...]) -> list[tuple[int, int]]:
+    introns: list[tuple[int, int]] = list()
+    start: int | None = None
+    for idx, aln_type in enumerate(row):
+        if aln_type == aln_t.intron and start is None:
+            start = idx
+        elif aln_type != aln_t.intron and start is not None:
+            introns.append((start, idx - 1))
+            start = None
+    if start is not None:
+        introns.append((start, len(row) - 1))
+    return introns
+
+
+def _estimate_binary_vars(
+    K: int,
+    M: int,
+    N: int,
+    J: int,
+    row_cell_type_count: int,
+    intronic_cell_count: int,
+) -> int:
+    isoform_count = K - 1
+    return (
+        N * K  # R2I
+        + M * isoform_count  # E2I
+        + M * N * isoform_count  # E2IR
+        + (M - 1) * N * isoform_count  # EXON_CONTIG2IR
+        + (M - 1) * isoform_count  # EXON_CONTIG2I
+        + (M + 2) * isoform_count  # C2I
+        + M * N * isoform_count  # C2IR
+        + (M + 1) * isoform_count  # CHANGE2I
+        + J * isoform_count  # I2T
+        + M * row_cell_type_count * isoform_count  # C2IRT
+        + M * J * isoform_count  # C2IT
+        + intronic_cell_count * isoform_count  # OBJ
+    )
+
+
+def _estimate_constraints(
+    K: int,
+    M: int,
+    N: int,
+    J: int,
+    row_cell_type_count: int,
+    intronic_cell_count: int,
+    intron_run_count: int,
+    unique_intron_run_count: int,
+) -> int:
+    isoform_count = K - 1
+    return (
+        N  # read assignment
+        + M * N * isoform_count  # E2IR definitions
+        + M * isoform_count * (N + 1)  # E2I max
+        + (M - 1) * N * isoform_count  # EXON_CONTIG2IR definitions
+        + (M - 1) * isoform_count * (N + 1)  # EXON_CONTIG2I max
+        + 2 * isoform_count  # C2I boundary definitions
+        + M * N * isoform_count  # C2IR definitions
+        + M * isoform_count * (N + 1)  # C2I max
+        + 4 * (M + 1) * isoform_count  # CHANGE2I xor
+        + isoform_count * (row_cell_type_count + J)  # I2T max
+        + M * row_cell_type_count * isoform_count  # C2IRT definitions
+        + M * isoform_count * (row_cell_type_count + J)  # C2IT max
+        + unique_intron_run_count * isoform_count  # GAPI definitions
+        + isoform_count  # CHANGE2I_sum definition
+        + 3 * (M - 1) * isoform_count  # exon contiguity and
+        + 3 * M * J * isoform_count  # cell type and
+        + isoform_count  # polyA constraint
+        + intron_run_count * isoform_count  # gap constraints
+        + 3 * intronic_cell_count * isoform_count  # OBJ and
+    )
+
+
 def run_ilp_loop(
     reads: list[Read],
     params: IsoformsParams,
@@ -291,11 +475,11 @@ def run_ilp_loop(
         status, recycling_bin, isoform_bin = run_ilp(canon_ints, params)
         assert status == pulp.LpStatusOptimal
         return canon_ints, recycling_bin, isoform_bin, list()
-    except TimeoutILP:
-        pass
+    except TimeoutILP as e:
+        timeout_exc = e
 
     if params.timeout_stategy == timeoutStrat.stop:
-        raise TimeoutILP
+        raise timeout_exc
     elif params.timeout_stategy == timeoutStrat.subsample:
         N2 = min(
             int(params.ilp_params.timeLimit * 30),  # Each 30 reads take ~1sec
