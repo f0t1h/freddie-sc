@@ -10,9 +10,11 @@ from freddie.ilp import IlpParams
 from freddie.isoforms import (
     get_isoforms,
     get_problem_size,
+    get_tint_size,
     Isoform,
     IsoformsParams,
     ProblemSize,
+    TintSize,
 )
 from freddie.split import FredSplit, FredSplitParams
 
@@ -80,6 +82,11 @@ def parse_args():
         "--dry-run-problem-sizes",
         action="store_true",
         help="Only report per-tint ILP size estimates. Does not build or solve ILPs.",
+    )
+    parser.add_argument(
+        "--dry-run-tint-sizes",
+        action="store_true",
+        help="Only report lightweight per-tint raw alignment metrics. Does not canonicalize reads, build ILPs, solve ILPs, or use worker processes.",
     )
     parser.add_argument(
         "--contig-min-len",
@@ -155,6 +162,9 @@ def parse_args():
     assert 0 < args.ilp_time_limit
     assert 0 < args.max_correction_len
     assert 0 < args.max_correction_count
+    assert not (
+        args.dry_run_problem_sizes and args.dry_run_tint_sizes
+    ), "Use only one dry-run mode at a time."
     print(f"[freddie] Args:", file=sys.stderr)
     for arg in vars(args):
         print(f"[freddie]   {arg}: {getattr(args, arg)}", file=sys.stderr)
@@ -194,6 +204,30 @@ def main():
         outfile = sys.stdout
     else:
         outfile = open(args.output, "w+")
+    if args.dry_run_tint_sizes:
+        pbar_tint = tqdm(
+            desc="[freddie] Tint progress",
+            total=1,
+            unit="tint",
+        )
+        pbar_reads = tqdm(
+            desc="[freddie] Read progress",
+            total=1,
+            unit="read",
+            unit_scale=True,
+        )
+        print(TintSize.header(), file=outfile, flush=True)
+        tints = split.generate_all_tints(pbar_tint, pbar_reads)
+        tints = list(tints) if args.generate_all_tints_first else tints
+        for tint in tints:
+            tint_size = get_tint_size(tint)
+            pbar_tint.update(1)
+            pbar_reads.update(tint_size.read_count)
+            print(tint_size, file=outfile, flush=True)
+        pbar_tint.close()
+        pbar_reads.close()
+        outfile.close()
+        return
     if args.readnames_output is not None and not args.dry_run_problem_sizes:
         args.readnames_output = open(args.readnames_output, "w+")
     with Pool(args.threads) as pool:

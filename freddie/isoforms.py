@@ -60,6 +60,35 @@ class ProblemSize:
         return "\t".join(str(getattr(self, field)) for field in self.__dataclass_fields__)
 
 
+@dataclass
+class TintSize:
+    contig: str
+    tint_id: int
+    read_count: int
+    alignment_interval_count: int
+    breakpoint_count: int
+    raw_canonical_interval_upper_bound: int
+    span_start: int
+    span_end: int
+    span_len: int
+    total_exonic_bp: int
+    intron_count: int
+    total_intronic_gap_bp: int
+    max_intronic_gap_bp: int
+    cell_type_count: int
+    read_cell_type_assignment_count: int
+    polyA_left_count: int
+    polyA_right_count: int
+    unique_alignment_signatures: int
+
+    @staticmethod
+    def header() -> str:
+        return "\t".join(TintSize.__dataclass_fields__)
+
+    def __str__(self) -> str:
+        return "\t".join(str(getattr(self, field)) for field in self.__dataclass_fields__)
+
+
 @functools.total_ordering
 class Isoform:
     """
@@ -284,6 +313,76 @@ def canonize_reads(reads):
     for i in range(10):
         canon_ints.pop(i)
     return canon_ints
+
+
+def get_tint_size(tint: Tint) -> TintSize:
+    """
+    Return raw per-tint metrics without canonicalization or ILP setup.
+    """
+    breakpoints: set[int] = set()
+    cell_types: set[str] = set()
+    alignment_signatures: set[tuple[tuple[int, int], ...]] = set()
+    alignment_interval_count = 0
+    total_exonic_bp = 0
+    intron_count = 0
+    total_intronic_gap_bp = 0
+    max_intronic_gap_bp = 0
+    read_cell_type_assignment_count = 0
+    polyA_left_count = 0
+    polyA_right_count = 0
+    span_start: int | None = None
+    span_end: int | None = None
+
+    for read in tint.reads:
+        if read.polyAs[0].length > 0:
+            polyA_left_count += 1
+        if read.polyAs[1].length > 0:
+            polyA_right_count += 1
+        cell_types.update(read.cell_types)
+        read_cell_type_assignment_count += len(read.cell_types)
+
+        signature: list[tuple[int, int]] = list()
+        intervals = read.intervals
+        alignment_interval_count += len(intervals)
+        for interval in intervals:
+            start = interval.target.start
+            end = interval.target.end
+            breakpoints.add(start)
+            breakpoints.add(end)
+            total_exonic_bp += end - start
+            signature.append((start, end))
+            span_start = start if span_start is None else min(span_start, start)
+            span_end = end if span_end is None else max(span_end, end)
+        for left, right in zip(intervals[:-1], intervals[1:]):
+            gap_len = right.target.start - left.target.end
+            intron_count += 1
+            total_intronic_gap_bp += gap_len
+            max_intronic_gap_bp = max(max_intronic_gap_bp, gap_len)
+        alignment_signatures.add(tuple(signature))
+
+    span_start = 0 if span_start is None else span_start
+    span_end = 0 if span_end is None else span_end
+
+    return TintSize(
+        contig=tint.contig,
+        tint_id=tint.tid,
+        read_count=len(tint.reads),
+        alignment_interval_count=alignment_interval_count,
+        breakpoint_count=len(breakpoints),
+        raw_canonical_interval_upper_bound=max(0, len(breakpoints) - 1),
+        span_start=span_start,
+        span_end=span_end,
+        span_len=span_end - span_start,
+        total_exonic_bp=total_exonic_bp,
+        intron_count=intron_count,
+        total_intronic_gap_bp=total_intronic_gap_bp,
+        max_intronic_gap_bp=max_intronic_gap_bp,
+        cell_type_count=len(cell_types),
+        read_cell_type_assignment_count=read_cell_type_assignment_count,
+        polyA_left_count=polyA_left_count,
+        polyA_right_count=polyA_right_count,
+        unique_alignment_signatures=len(alignment_signatures),
+    )
 
 
 def get_problem_size(
