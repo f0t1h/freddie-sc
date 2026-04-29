@@ -309,10 +309,7 @@ def run_ilp(
 
 
 def canonize_reads(reads):
-    canon_ints = CanonIntervals(reads)
-    for i in range(10):
-        canon_ints.pop(i)
-    return canon_ints
+    return CanonIntervals.from_consensus(reads, threshold=10)
 
 
 def get_tint_size(tint: Tint) -> TintSize:

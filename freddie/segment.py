@@ -1,3 +1,4 @@
+import bisect
 from collections import Counter, defaultdict
 import enum
 from itertools import groupby
@@ -249,6 +250,99 @@ class CanonIntervals:
                     cint.add_ridx(idx, aln_t.intron)
             result.append(cint)
         return result
+
+    @staticmethod
+    def cluster_breakpoints(raw_breakpoints: list[int], threshold: int = 10) -> list[int]:
+        if len(raw_breakpoints) == 0:
+            return []
+        sorted_bps = sorted(raw_breakpoints)
+        clusters: list[list[int]] = [[sorted_bps[0]]]
+        for bp in sorted_bps[1:]:
+            if bp - clusters[-1][0] < threshold:
+                clusters[-1].append(bp)
+            else:
+                clusters.append([bp])
+        return [cluster[len(cluster) // 2] for cluster in clusters]
+
+    @staticmethod
+    def _assign_reads_to_consensus_intervals(
+        reads: list[Read],
+        consensus_breakpoints: list[int],
+    ) -> list["CanonIntervals.CanonInterval"]:
+        M = len(consensus_breakpoints) - 1
+        intervals = [
+            CanonIntervals.CanonInterval(
+                start=consensus_breakpoints[j],
+                end=consensus_breakpoints[j + 1],
+            )
+            for j in range(M)
+        ]
+        for ridx, read in enumerate(reads):
+            if len(read.intervals) == 0:
+                continue
+            read_start = read.intervals[0].target.start
+            read_end = read.intervals[-1].target.end
+            j_lo = bisect.bisect_right(consensus_breakpoints, read_start) - 1
+            j_hi = bisect.bisect_left(consensus_breakpoints, read_end)
+            j_lo = max(0, j_lo)
+            j_hi = min(M, j_hi)
+
+            exon_idx = 0
+            for j in range(j_lo, j_hi):
+                s = consensus_breakpoints[j]
+                e = consensus_breakpoints[j + 1]
+                exonic_overlap = 0
+                while exon_idx < len(read.intervals) and read.intervals[exon_idx].target.end <= s:
+                    exon_idx += 1
+                scan = exon_idx
+                while scan < len(read.intervals) and read.intervals[scan].target.start < e:
+                    ov_s = max(read.intervals[scan].target.start, s)
+                    ov_e = min(read.intervals[scan].target.end, e)
+                    if ov_s < ov_e:
+                        exonic_overlap += ov_e - ov_s
+                    scan += 1
+                int_len = e - s
+                if s < read_start or e > read_end:
+                    covered_s = max(s, read_start)
+                    covered_e = min(e, read_end)
+                    if covered_e <= covered_s:
+                        continue
+                    intronic_overlap = (covered_e - covered_s) - exonic_overlap
+                else:
+                    intronic_overlap = int_len - exonic_overlap
+                if exonic_overlap > intronic_overlap:
+                    intervals[j].add_ridx(ridx, aln_t.exon)
+                elif intronic_overlap > 0:
+                    intervals[j].add_ridx(ridx, aln_t.intron)
+        return intervals
+
+    @classmethod
+    def from_consensus(
+        cls,
+        reads: list[Read],
+        threshold: int = 10,
+    ) -> "CanonIntervals":
+        raw_breakpoints: list[int] = []
+        for read in reads:
+            for interval in read.intervals:
+                raw_breakpoints.append(interval.target.start)
+                raw_breakpoints.append(interval.target.end)
+        consensus_bps = cls.cluster_breakpoints(raw_breakpoints, threshold)
+        if len(consensus_bps) < 2:
+            return cls(reads)
+        intervals = cls._assign_reads_to_consensus_intervals(reads, consensus_bps)
+        obj = cls.__new__(cls)
+        obj.reads = reads
+        obj.polyA_slacks = [
+            [read.polyAs[0].slack, read.polyAs[1].slack]
+            for read in reads
+        ]
+        obj.intervals = intervals
+        obj.matrix = np.ndarray((0, 0), dtype=np.uint8)
+        obj.validate_intervals()
+        obj.extend()
+        obj.compress()
+        return obj
 
     def extend(self, recompute_matrix=False):
         """
