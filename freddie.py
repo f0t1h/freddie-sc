@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 import argparse
 import functools
-from multiprocessing import Pool
+from concurrent.futures import ProcessPoolExecutor
+from queue import Empty, Queue
 import sys
+import threading
 
 from tqdm import tqdm
 
@@ -172,6 +174,70 @@ def parse_args():
     return args
 
 
+class SPMCPool:
+    """Drop-in replacement for multiprocessing.Pool.
+    A producer thread submits tasks with backpressure (semaphore);
+    done-callbacks push results to a queue the caller drains.
+    Each worker independently pulls its next task, so a slow ILP
+    on one worker never blocks others from picking up new work."""
+
+    def __init__(self, num_workers):
+        self._num_workers = num_workers
+        self._executor = None
+
+    def __enter__(self):
+        self._executor = ProcessPoolExecutor(max_workers=self._num_workers)
+        return self
+
+    def __exit__(self, *args):
+        self._executor.shutdown(wait=True)
+        self._executor = None
+
+    def imap_unordered(self, func, iterable):
+        results = Queue()
+        sem = threading.Semaphore(self._num_workers * 2)
+        submitted = [0]
+        producer_done = threading.Event()
+
+        def _on_done(future):
+            sem.release()
+            try:
+                results.put((True, future.result()))
+            except Exception as e:
+                results.put((False, e))
+
+        def _produce():
+            for item in iterable:
+                sem.acquire()
+                future = self._executor.submit(func, item)
+                submitted[0] += 1
+                future.add_done_callback(_on_done)
+            producer_done.set()
+
+        producer = threading.Thread(target=_produce, daemon=True)
+        producer.start()
+
+        processed = 0
+        while True:
+            try:
+                ok, payload = results.get(timeout=0.5)
+            except Empty:
+                if producer_done.is_set() and processed >= submitted[0]:
+                    break
+                continue
+
+            if not ok:
+                raise payload
+
+            processed += 1
+            yield payload
+
+            if producer_done.is_set() and processed >= submitted[0]:
+                break
+
+        producer.join()
+
+
 def main():
     args = parse_args()
 
@@ -230,7 +296,7 @@ def main():
         return
     if args.readnames_output is not None and not args.dry_run_problem_sizes:
         args.readnames_output = open(args.readnames_output, "w+")
-    with Pool(args.threads) as pool:
+    with SPMCPool(args.threads) as pool:
         pbar_tint = tqdm(
             desc="[freddie] Tint progress",
             total=1,
