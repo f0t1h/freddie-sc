@@ -1,9 +1,8 @@
 #!/usr/bin/env python
 import argparse
-from concurrent.futures import ProcessPoolExecutor
-from queue import Empty, Queue
+from multiprocessing import Process, Queue as MPQueue
+from queue import Empty
 import sys
-import threading
 
 from tqdm import tqdm
 
@@ -173,128 +172,39 @@ def parse_args():
     return args
 
 
-class SPMCPool:
-    """Drop-in replacement for multiprocessing.Pool.
-    A producer thread submits tasks with backpressure (semaphore);
-    done-callbacks push results to a queue the caller drains.
-    Each worker independently pulls its next task, so a slow ILP
-    on one worker never blocks others from picking up new work."""
+def _contig_worker(work_q, result_q, bam_path, split_params, rname_to_celltypes, isoform_params, mode):
+    """Worker process: pull contigs from work_q, stream per-tint results to result_q."""
+    import traceback
 
-    def __init__(self, num_workers, initializer=None, initargs=()):
-        self._num_workers = num_workers
-        self._initializer = initializer
-        self._initargs = initargs
-        self._executor = None
-        self._stop = threading.Event()
-        self._producer = None
-
-    def __enter__(self):
-        self._executor = ProcessPoolExecutor(
-            max_workers=self._num_workers,
-            initializer=self._initializer,
-            initargs=self._initargs,
-        )
-        self._stop.clear()
-        return self
-
-    def __exit__(self, *args):
-        self._stop.set()
-        if self._producer is not None and self._producer.is_alive():
-            self._producer.join(timeout=10)
-        self._executor.shutdown(wait=True)
-        self._executor = None
-
-    def imap_unordered(self, func, iterable):
-        results = Queue()
-        sem = threading.Semaphore(self._num_workers * 2)
-        submitted = [0]
-        producer_done = threading.Event()
-
-        def _on_done(future):
-            sem.release()
-            try:
-                results.put((True, future.result()))
-            except Exception as e:
-                results.put((False, e))
-
-        def _produce():
-            try:
-                for item in iterable:
-                    while not self._stop.is_set():
-                        if sem.acquire(timeout=1.0):
-                            break
-                    if self._stop.is_set():
-                        return
-                    future = self._executor.submit(func, item)
-                    submitted[0] += 1
-                    future.add_done_callback(_on_done)
-            except Exception:
-                return
-            producer_done.set()
-
-        self._producer = threading.Thread(target=_produce, daemon=True)
-        self._producer.start()
-
-        processed = 0
-        while True:
-            try:
-                ok, payload = results.get(timeout=0.5)
-            except Empty:
-                if producer_done.is_set() and processed >= submitted[0]:
-                    break
-                if not self._producer.is_alive() and not producer_done.is_set():
-                    break
-                continue
-
-            if not ok:
-                raise payload
-
-            processed += 1
-            yield payload
-
-            if producer_done.is_set() and processed >= submitted[0]:
-                break
-
-        self._producer.join()
-
-
-_worker_split: FredSplit | None = None
-
-
-def _init_contig_worker(bam_path, split_params, rname_to_celltypes):
-    global _worker_split
-    _worker_split = FredSplit(
+    split = FredSplit(
         bam_path=bam_path,
         params=split_params,
         rname_to_celltypes=rname_to_celltypes,
     )
-
-
-def _process_contig(args):
-    contig_name, isoform_params = args
-    isoforms: list[Isoform] = []
-    tint_count = 0
-    total_reads = 0
-    for reads in _worker_split.overlapping_reads(_worker_split.sam, contig_name):
-        for tint_reads in FredSplit.get_tints(reads):
-            tint = Tint(contig=contig_name, reads=tint_reads, tid=tint_count)
-            tint_count += 1
-            total_reads += len(tint_reads)
-            _, tint_isoforms = get_isoforms(tint, isoform_params)
-            isoforms.extend(tint_isoforms)
-    return total_reads, tint_count, isoforms
-
-
-def _get_contig_problem_sizes(args):
-    contig_name, isoform_params = args
-    problem_sizes: list[ProblemSize] = []
-    total_reads = 0
-    for reads in _worker_split.overlapping_reads(_worker_split.sam, contig_name):
-        for tint_reads in FredSplit.get_tints(reads):
-            tint = Tint(contig=contig_name, reads=tint_reads, tid=len(problem_sizes))
-            total_reads += len(tint_reads)
-            problem_sizes.append(get_problem_size(tint, isoform_params))
-    return total_reads, problem_sizes
+    while True:
+        contig = work_q.get()
+        if contig is None:
+            return
+        try:
+            tint_count = 0
+            for reads in split.overlapping_reads(split.sam, contig):
+                for tint_reads in FredSplit.get_tints(reads):
+                    tint = Tint(contig=contig, reads=tint_reads, tid=tint_count)
+                    tint_count += 1
+                    if mode == "problem_sizes":
+                        ps = get_problem_size(tint, isoform_params)
+                        result_q.put((ps.read_count, ps))
+                    else:
+                        _, isoforms = get_isoforms(tint, isoform_params)
+                        result_q.put((len(tint_reads), isoforms))
+        except Exception:
+            print(
+                f"[freddie] Worker error on contig {contig}:\n{traceback.format_exc()}",
+                file=sys.stderr,
+                flush=True,
+            )
+        finally:
+            result_q.put(None)
 
 
 def main():
@@ -362,57 +272,73 @@ def main():
     contigs = [c.name for c in split.contigs]
     del split
 
-    contig_args = [(contig, isoform_params) for contig in contigs]
+    mode = "problem_sizes" if args.dry_run_problem_sizes else "isoforms"
+    work_q: MPQueue = MPQueue()
+    result_q: MPQueue = MPQueue()
+
+    workers: list[Process] = []
+    for _ in range(args.threads):
+        p = Process(
+            target=_contig_worker,
+            args=(work_q, result_q, args.bam, split_params, args.rname_to_celltypes, isoform_params, mode),
+            daemon=True,
+        )
+        p.start()
+        workers.append(p)
+
+    for contig in contigs:
+        work_q.put(contig)
+    for _ in workers:
+        work_q.put(None)
 
     if args.readnames_output is not None and not args.dry_run_problem_sizes:
         args.readnames_output = open(args.readnames_output, "w+")
-    with SPMCPool(
-        args.threads,
-        initializer=_init_contig_worker,
-        initargs=(args.bam, split_params, args.rname_to_celltypes),
-    ) as pool:
-        pbar_contig = tqdm(
-            desc="[freddie] Contig progress",
-            total=len(contigs),
-            unit="contig",
-        )
-        pbar_tint = tqdm(
-            desc="[freddie] Tint progress",
-            unit="tint",
-        )
-        pbar_reads = tqdm(
-            desc="[freddie] Read progress",
-            unit="read",
-            unit_scale=True,
-        )
+
+    pbar_contig = tqdm(
+        desc="[freddie] Contig progress",
+        total=len(contigs),
+        unit="contig",
+    )
+    pbar_tint = tqdm(desc="[freddie] Tint progress", unit="tint")
+    pbar_reads = tqdm(desc="[freddie] Read progress", unit="read", unit_scale=True)
+
+    if args.dry_run_problem_sizes:
+        print(ProblemSize.header(), file=outfile)
+
+    contigs_done = 0
+    while contigs_done < len(contigs):
+        try:
+            result = result_q.get(timeout=5.0)
+        except Empty:
+            if all(not p.is_alive() for p in workers):
+                break
+            continue
+        if result is None:
+            contigs_done += 1
+            pbar_contig.update(1)
+            continue
+        read_count, payload = result
+        pbar_tint.update(1)
+        pbar_reads.update(read_count)
         if args.dry_run_problem_sizes:
-            print(ProblemSize.header(), file=outfile)
-            for total_reads, problem_sizes in pool.imap_unordered(
-                _get_contig_problem_sizes, contig_args
-            ):
-                pbar_contig.update(1)
-                for ps in problem_sizes:
-                    pbar_tint.update(1)
-                    pbar_reads.update(ps.read_count)
-                    print(ps, file=outfile)
+            print(payload, file=outfile)
         else:
-            for total_reads, tint_count, isoforms in pool.imap_unordered(
-                _process_contig, contig_args
-            ):
-                pbar_contig.update(1)
-                pbar_tint.update(tint_count)
-                pbar_reads.update(total_reads)
-                for isoform in isoforms:
-                    if args.sort_output:
-                        all_isoforms.append(isoform)
-                    else:
-                        print(isoform, file=outfile)
-                    if args.readnames_output is not None:
-                        for read in isoform.reads:
-                            print(f"{isoform.iid}\t{read.name}", file=args.readnames_output)
-        pbar_contig.close()
-        pbar_tint.close()
-        pbar_reads.close()
+            for isoform in payload:
+                if args.sort_output:
+                    all_isoforms.append(isoform)
+                else:
+                    print(isoform, file=outfile)
+                if args.readnames_output is not None:
+                    for read in isoform.reads:
+                        print(f"{isoform.iid}\t{read.name}", file=args.readnames_output)
+
+    pbar_contig.close()
+    pbar_tint.close()
+    pbar_reads.close()
+
+    for p in workers:
+        p.join(timeout=10)
+
     if args.sort_output and not args.dry_run_problem_sizes:
         all_isoforms.sort()
         for isoform in all_isoforms:
