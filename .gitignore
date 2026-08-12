@@ -8,6 +8,7 @@ gurobi.log
 *.run.log
 .vscode/
 bin/
+*.sif
 
 # C++ build trees (the global build/ rule below misses these siblings)
 build2/

@@ -4,5 +4,3 @@
 # true when the reads already carry barcodes (skips flexiplex).
 sample,fastq,ref,chemistry,whitelist,demuxed
 NOA_chr19,raw-data/NOA_chr19.fastq.gz,GRCh38,10x3v3,data/whitelists/3M-february-2018.txt,true
-S1_3v3_alwaysend,output/simulate/TS/S1_3v3_alwaysend.fastq,GRCh38,10x3v3,data/whitelists/3M-february-2018.txt,false
-S1_3v3_recal,output/simulate/TS/S1_3v3_recal.fastq,GRCh38,10x3v3,data/whitelists/3M-february-2018.txt,false
