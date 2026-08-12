@@ -1,0 +1,27 @@
+# Apptainer profile for the analysis workflow — the "-profile" analog.
+#
+# Runs every shell rule inside the scfreddie.sif image (freddie-core + putagene
+# built from docker/scfreddie.def, NOT the Seqera base). Snakemake still runs on
+# the host; only the rule commands execute in the container, where the tools are
+# on PATH — so `binaries` below just names the bare commands.
+#
+# Usage (compose with your normal config):
+#   snakemake --workflow-profile profiles/apptainer \
+#             -s sclr-putagene/Snakefile \
+#             --configfile config.yaml -j8
+#
+# Edit `container.image` (the .sif path) and the --bind below for your machine.
+# These `config:` entries layer over --configfile, so they don't clobber it.
+
+software-deployment-method:
+  - apptainer
+
+# Bind any host paths your data/output live under if they're outside $PWD.
+# (Apptainer auto-mounts $PWD and $HOME; add others here.)
+apptainer-args: "--bind /World/lrsc"
+
+# Point the workflow at the image and tell it the tools are on the container PATH.
+# Absolute .sif path — edit for your machine.
+config:
+  - "container={'image': '/World/lrsc/freddie-sc/scfreddie.sif'}"
+  - "binaries={'freddie-core': 'freddie-core', 'putagene': 'putagene'}"

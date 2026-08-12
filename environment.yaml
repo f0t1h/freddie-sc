@@ -1,0 +1,47 @@
+# Everything needed to build and run the three tools.
+#
+#   micromamba create -f environment.yaml   # or conda/mamba env create -f ...
+#   micromamba activate scfreddie
+#   cmake -S . -B build && cmake --build build -j
+#
+# The C++ builds fetch a few header-only libraries (CLI11, fmt, simdjson,
+# Taskflow, ZeroMQ, HiGHS) the first time, so that first build needs network.
+# htslib and zlib come from here.
+#
+# Gurobi isn't installed — it needs a license. To use it, add the gurobi package
+# and configure with -DFREDDIE_ENABLE_GUROBI=ON (see the README).
+name: scfreddie
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  # ---- build toolchain ----
+  - python >=3.10
+  - cmake >=3.20,<4       # cmake 4 breaks the fetched deps' min-version
+  - make
+  - cxx-compiler          # C++20-capable g++/clang
+  - pkg-config
+  - git
+
+  # ---- C++ link deps ----
+  - htslib >=1.17
+  - zlib
+
+  # ---- workflow + external tools ----
+  - snakemake-minimal >=7.0
+  - minimap2 >=2.24
+  - samtools >=1.17
+  - flexiplex >=1.0
+  - pigz                  # the flexiplex/demux rules decompress with pigz -dcf
+
+  # ---- Python analysis stack ----
+  - pysam >=0.21
+  - numpy >=1.23
+  - scipy >=1.9
+  - pandas >=1.5
+  - scanpy >=1.9        # brings scikit-learn, networkx, tqdm
+  - scikit-image        # scrublet's automatic threshold (sc.pp.scrublet); optional
+                        # scanpy dep, not pulled in automatically
+  - python-igraph       # sc.tl.leiden(flavor="igraph"); optional scanpy dep
+  - anndata >=0.9
+  - matplotlib >=3.6

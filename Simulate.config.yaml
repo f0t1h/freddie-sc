@@ -28,34 +28,272 @@ TS_experiments:
             - Tsb:
                   params: "--molecule-count 100000 --molecule-prefix C5: -s 45"
                   model: MCF7
+    C1_opt:
+        pipeline:
+            - Tsb:
+                  params: "--molecule-count 100000 --molecule-prefix C1: -s 41"
+                  model: A549_opt
+    C2_opt:
+        pipeline:
+            - Tsb:
+                  params: "--molecule-count 100000 --molecule-prefix C2: -s 42"
+                  model: Hct116_opt
+    C3_opt:
+        pipeline:
+            - Tsb:
+                  params: "--molecule-count 100000 --molecule-prefix C3: -s 43"
+                  model: HepG2_opt
+    C4_opt:
+        pipeline:
+            - Tsb:
+                  params: "--molecule-count 100000 --molecule-prefix C4: -s 44"
+                  model: K562_opt
+    C5_opt:
+        pipeline:
+            - Tsb:
+                  params: "--molecule-count 100000 --molecule-prefix C5: -s 45"
+                  model: MCF7_opt
+    C1_10xv2:
+        pipeline:
+            - Tsb:
+                  params: "--molecule-count 100000 --molecule-prefix C1: -s 41"
+                  model: A549_10xv2
+    C2_10xv2:
+        pipeline:
+            - Tsb:
+                  params: "--molecule-count 100000 --molecule-prefix C2: -s 42"
+                  model: Hct116_10xv2
+    C3_10xv2:
+        pipeline:
+            - Tsb:
+                  params: "--molecule-count 100000 --molecule-prefix C3: -s 43"
+                  model: HepG2_10xv2
+    C4_10xv2:
+        pipeline:
+            - Tsb:
+                  params: "--molecule-count 100000 --molecule-prefix C4: -s 44"
+                  model: K562_10xv2
+    C5_10xv2:
+        pipeline:
+            - Tsb:
+                  params: "--molecule-count 100000 --molecule-prefix C5: -s 45"
+                  model: MCF7_10xv2
     S1:
+        # 10x Chromium Single Cell 3' v3 read-facing structure (5'->3'):
+        #   [Read1 partial] [CB 16nt] [UMI 12nt] [polyT] [cDNA]
+        # Build the barcode-bearing end before Trc so truncation preserves it.
         pipeline:
             - Mrg:
                   sources: ["C1", "C2", "C3", "C4", "C5"]
             - plA:
-                  params: "--normal=15,7.5"
+                  params: "--normal 15 7.5"
+            - Flp:
+                  params: "-p 1.0"
+            - Tag:
+                  params: "--format5 12" # 12nt UMI (10x 3' v3)
+            - SCB:
+                  params: "--barcode-placement 5p"
+            - Tag:
+                  params: "--format5 CTACACGACGCTCTTCCGATCT"
             - Trc:
                   params: ""
                   model: MCF7
-            - Tag:
-                  params: "--format3 10"
-            - SCB:
-                  params: ""
-            - Tag:
-                  params: "--format3 AGATCGGAAGAGCGTCGTGTAG"
             - PCR:
                   params: "--cycles 5 --molecule-count 5000000 -x Taq-setting1"
-            - Flp:
-                  params: "-p 0.5"
             - Tag:
                   params: "--format5 AATGTACTTCGTTCAGTTACGTATTGCT --format3 GCAATACGTAACTGAACGAAGT"
             - Shf:
                   params: ""
             - Seq:
-                  params: "--skip-qual-compute"
+                  params: "--skip-qual-compute --badread-identity 95,99,2.5"
+    S1_5v2:
+        # 10x Chromium Single Cell 5' v2 read-facing structure (5'->3'):
+        #   [Read1 partial] [CB 16nt] [UMI 10nt] [TSO spacer] [cDNA]
+        # Build the barcode-bearing end before Trc so truncation preserves it.
+        pipeline:
+            - Mrg:
+                  sources:
+                      [
+                          "C1_10xv2",
+                          "C2_10xv2",
+                          "C3_10xv2",
+                          "C4_10xv2",
+                          "C5_10xv2",
+                      ]
+            - Tag:
+                  params: "--format5 TTTCTTATATGGG"
+            - Tag:
+                  params: "--format5 10" # 10nt UMI (10x 5' v2)
+            - SCB:
+                  params: "--barcode-placement 5p"
+            - Tag:
+                  params: "--format5 CTACACGACGCTCTTCCGATCT"
+            - Trc:
+                  params: ""
+                  model: MCF7
+            - PCR:
+                  params: "--cycles 5 --molecule-count 5000000 -x Taq-setting1"
+            - Tag:
+                  params: "--format5 AATGTACTTCGTTCAGTTACGTATTGCT --format3 GCAATACGTAACTGAACGAAGT"
+            - Shf:
+                  params: ""
+            - Seq:
+                  params: "--skip-qual-compute --badread-identity 95,99,2.5"
+    S1_3v2:
+        # 10x Chromium Single Cell 3' v2 read-facing structure (5'->3'):
+        #   [Read1 partial] [CB 16nt] [UMI 10nt] [polyT] [cDNA]
+        # Build the barcode-bearing end before Trc so truncation preserves it.
+        pipeline:
+            - Mrg:
+                  sources:
+                      [
+                          "C1_10xv2",
+                          "C2_10xv2",
+                          "C3_10xv2",
+                          "C4_10xv2",
+                          "C5_10xv2",
+                      ]
+            - plA:
+                  params: "--normal 15 7.5"
+            - Flp:
+                  params: "-p 1.0"
+            - Tag:
+                  params: "--format5 10" # 10nt UMI (10x 3' v2)
+            - SCB:
+                  params: "--barcode-placement 5p"
+            - Tag:
+                  params: "--format5 CTACACGACGCTCTTCCGATCT"
+            - Trc:
+                  params: ""
+                  model: MCF7
+            - PCR:
+                  params: "--cycles 5 --molecule-count 5000000 -x Taq-setting1"
+            - Tag:
+                  params: "--format5 AATGTACTTCGTTCAGTTACGTATTGCT --format3 GCAATACGTAACTGAACGAAGT"
+            - Shf:
+                  params: ""
+            - Seq:
+                  params: "--skip-qual-compute --badread-identity 95,99,2.5"
+    S1_3v3:
+        # 10x Chromium Single Cell 3' v3 read-facing structure (5'->3'):
+        #   [Read1 partial] [CB 16nt] [UMI 12nt] [polyT] [cDNA]
+        # Build the barcode-bearing end before Trc so truncation preserves it.
+        pipeline:
+            - Mrg:
+                  sources: ["C1", "C2", "C3", "C4", "C5"]
+            - plA:
+                  params: "--normal 15 7.5"
+            - Flp:
+                  params: "-p 1.0"
+            - Tag:
+                  params: "--format5 12" # 12nt UMI (10x 3' v3)
+            - SCB:
+                  params: "--barcode-placement 5p"
+            - Tag:
+                  params: "--format5 CTACACGACGCTCTTCCGATCT"
+            - Trc:
+                  params: ""
+                  model: MCF7
+            - PCR:
+                  params: "--cycles 5 --molecule-count 5000000 -x Taq-setting1"
+            - Tag:
+                  params: "--format5 AATGTACTTCGTTCAGTTACGTATTGCT --format3 GCAATACGTAACTGAACGAAGT"
+            - Shf:
+                  params: ""
+            - Seq:
+                  params: "--skip-qual-compute --badread-identity 95,99,2.5"
+    S1_3v3_alwaysend:
+        # Optimal simulation: --cb-lognorm-params 10,0.7 + --always-end truncation
+        # Same as S1_3v3 but with one-sided truncation preserving the 5' barcode
+        pipeline:
+            - Mrg:
+                  sources: ["C1_opt", "C2_opt", "C3_opt", "C4_opt", "C5_opt"]
+            - plA:
+                  params: "--normal 15 7.5"
+            - Flp:
+                  params: "-p 1.0"
+            - Tag:
+                  params: "--format5 12" # 12nt UMI (10x 3' v3)
+            - SCB:
+                  params: "--barcode-placement 5p"
+            - Tag:
+                  params: "--format5 CTACACGACGCTCTTCCGATCT"
+            - Trc:
+                  params: "--always-end"
+                  model: MCF7
+            - PCR:
+                  params: "--cycles 5 --molecule-count 5000000 -x Taq-setting1"
+            - Tag:
+                  params: "--format5 AATGTACTTCGTTCAGTTACGTATTGCT --format3 GCAATACGTAACTGAACGAAGT"
+            - Shf:
+                  params: ""
+            - Seq:
+                  params: "--skip-qual-compute --badread-identity 95,99,2.5"
+    S1_3v3_notrunc:
+        # Control for S1_3v3_alwaysend: identical pipeline with the Trc
+        # (truncation) step removed, so every read spans the full transcript.
+        # Used to test whether read truncation drives the partial_truncation
+        # false positives / precision drop in eval.
+        pipeline:
+            - Mrg:
+                  sources: ["C1_opt", "C2_opt", "C3_opt", "C4_opt", "C5_opt"]
+            - plA:
+                  params: "--normal 15 7.5"
+            - Flp:
+                  params: "-p 1.0"
+            - Tag:
+                  params: "--format5 12" # 12nt UMI (10x 3' v3)
+            - SCB:
+                  params: "--barcode-placement 5p"
+            - Tag:
+                  params: "--format5 CTACACGACGCTCTTCCGATCT"
+            - PCR:
+                  params: "--cycles 5 --molecule-count 5000000 -x Taq-setting1"
+            - Tag:
+                  params: "--format5 AATGTACTTCGTTCAGTTACGTATTGCT --format3 GCAATACGTAACTGAACGAAGT"
+            - Shf:
+                  params: ""
+            - Seq:
+                  params: "--skip-qual-compute --badread-identity 95,99,2.5"
+    S1_3v3_recal:
+        # Recalibrated truncation. The MCF7 --always-end KDE (S1_3v3_alwaysend)
+        # over-collapses reads to single-exon: measured read-class mix on the
+        # aligned reads (freddie-core read-completeness) was single 58% / full
+        # 9.5% / subchain 32%, vs the real NOA_chr19 sample's 43% / 29% / 15%
+        # (renorm over the 3 annotation-classes: ~49 / 34 / 17). A --lognormal
+        # kept-length model with high sigma reproduces the bimodal 10x-3' shape
+        # (reads either full-length or collapsed to a single exon, few partial).
+        # --lognormal 6.9 1.0 gives single 49.4 / full 30.9 / subchain 19.6 on
+        # the pre-Trc MDF (sclr-putagene/scripts/mdf_trunc_mix.py) — ~8x closer
+        # to real than the KDE. The parametric path keeps the 5' prefix (barcode)
+        # like --always-end, so no --always-end flag is needed. Truncation DEPTH
+        # already matched real, so only the collapse rate is being corrected.
+        pipeline:
+            - Mrg:
+                  sources: ["C1_opt", "C2_opt", "C3_opt", "C4_opt", "C5_opt"]
+            - plA:
+                  params: "--normal 15 7.5"
+            - Flp:
+                  params: "-p 1.0"
+            - Tag:
+                  params: "--format5 12" # 12nt UMI (10x 3' v3)
+            - SCB:
+                  params: "--barcode-placement 5p"
+            - Tag:
+                  params: "--format5 CTACACGACGCTCTTCCGATCT"
+            - Trc:
+                  params: "--lognormal 6.9 1.0"
+            - PCR:
+                  params: "--cycles 5 --molecule-count 5000000 -x Taq-setting1"
+            - Tag:
+                  params: "--format5 AATGTACTTCGTTCAGTTACGTATTGCT --format3 GCAATACGTAACTGAACGAAGT"
+            - Shf:
+                  params: ""
+            - Seq:
+                  params: "--skip-qual-compute --badread-identity 95,99,2.5"
 
 exec:
-    tksm: bin/tksm
+    tksm: extern/tksm2/build/tksm2
 
 refs:
     Homo_sapiens:
@@ -67,7 +305,9 @@ refs:
         DNA: data/refs/homo_sapiens.chr21.dna.fa
         cDNA: data/refs/homo_sapiens.chr21.cdna.fa
     barcodes:
-        10x: data/refs/3M-february-2018.txt.gz
+        10x: data/whitelists/3M-february-2018.txt
+        10x_3v3: data/whitelists/3M-february-2018.txt
+        10x_v2: data/whitelists/737K-august-2016.txt
 
 samples:
     A549:
@@ -116,40 +356,81 @@ models:
         A549:
             sample: A549
             cb-txt: 10x
-            params: "--cb-count 500  --cb-dropout 0.0 --random-seed 41"
+            params: "--cb-count 500  --cb-dropout 0.0  --seed 41"
         Hct116:
             sample: Hct116
             cb-txt: 10x
-            params: "--cb-count 500  --cb-dropout 0.0 --random-seed 42"
+            params: "--cb-count 500  --cb-dropout 0.0  --seed 42"
         HepG2:
             sample: HepG2
             cb-txt: 10x
-            params: "--cb-count 500  --cb-dropout 0.0 --random-seed 43"
+            params: "--cb-count 500  --cb-dropout 0.0  --seed 43"
         K562:
             sample: K562
             cb-txt: 10x
-            params: "--cb-count 500  --cb-dropout 0.0 --random-seed 44"
+            params: "--cb-count 500  --cb-dropout 0.0  --seed 44"
         MCF7:
             sample: MCF7
             cb-txt: 10x
-            params: "--cb-count 500  --cb-dropout 0.0 --random-seed 45"
+            params: "--cb-count 500  --cb-dropout 0.0  --seed 45"
+        A549_10xv2:
+            sample: A549
+            cb-txt: 10x_v2
+            params: "--cb-count 500  --cb-dropout 0.0  --seed 41"
+        Hct116_10xv2:
+            sample: Hct116
+            cb-txt: 10x_v2
+            params: "--cb-count 500  --cb-dropout 0.0  --seed 42"
+        HepG2_10xv2:
+            sample: HepG2
+            cb-txt: 10x_v2
+            params: "--cb-count 500  --cb-dropout 0.0  --seed 43"
+        K562_10xv2:
+            sample: K562
+            cb-txt: 10x_v2
+            params: "--cb-count 500  --cb-dropout 0.0  --seed 44"
+        MCF7_10xv2:
+            sample: MCF7
+            cb-txt: 10x_v2
+            params: "--cb-count 500  --cb-dropout 0.0  --seed 45"
         A549_chr21:
             sample: A549_chr21
             cb-txt: 10x
-            params: "--cb-count 500  --cb-dropout 0.0 --random-seed 41"
+            params: "--cb-count 500  --cb-dropout 0.0  --seed 41"
         Hct116_chr21:
             sample: Hct116_chr21
             cb-txt: 10x
-            params: "--cb-count 500  --cb-dropout 0.0 --random-seed 42"
+            params: "--cb-count 500  --cb-dropout 0.0  --seed 42"
         HepG2_chr21:
             sample: HepG2_chr21
             cb-txt: 10x
-            params: "--cb-count 500  --cb-dropout 0.0 --random-seed 43"
+            params: "--cb-count 500  --cb-dropout 0.0  --seed 43"
         K562_chr21:
             sample: K562_chr21
             cb-txt: 10x
-            params: "--cb-count 500  --cb-dropout 0.0 --random-seed 44"
+            params: "--cb-count 500  --cb-dropout 0.0  --seed 44"
         MCF7_chr21:
             sample: MCF7_chr21
             cb-txt: 10x
-            params: "--cb-count 500  --cb-dropout 0.0 --random-seed 45"
+            params: "--cb-count 500  --cb-dropout 0.0  --seed 45"
+        # Optimal models: --cb-lognorm-params 10,0.7
+        A549_opt:
+            sample: A549
+            cb-txt: 10x
+            params: "--cb-count 500  --cb-dropout 0.0  --seed 41 --cb-lognorm-params 10,0.7"
+        Hct116_opt:
+            sample: Hct116
+            cb-txt: 10x
+            params: "--cb-count 500  --cb-dropout 0.0  --seed 42 --cb-lognorm-params 10,0.7"
+        HepG2_opt:
+            sample: HepG2
+            cb-txt: 10x
+            params: "--cb-count 500  --cb-dropout 0.0  --seed 43 --cb-lognorm-params 10,0.7"
+        K562_opt:
+            sample: K562
+            cb-txt: 10x
+            params: "--cb-count 500  --cb-dropout 0.0  --seed 44 --cb-lognorm-params 10,0.7"
+        MCF7_opt:
+            sample: MCF7
+            cb-txt: 10x
+            params: "--cb-count 500  --cb-dropout 0.0  --seed 45 --cb-lognorm-params 10,0.7"

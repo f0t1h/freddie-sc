@@ -9,7 +9,7 @@ if len(config) == 0:
 
 module TS_smk:
     snakefile:
-        "extern/tksm/Snakefile"
+        "extern/tksm2/Snakefile"
     config:
         config
 

@@ -1,0 +1,21 @@
+# Keep the build context small and free of machine-local state.
+.git
+**/.git
+.snakemake/
+output/
+data/
+raw-data/
+figs/
+slurm_logs/
+
+# C++ build trees (rebuilt inside the image by build.sh)
+**/build/
+**/build2/
+**/build-gurobi/
+
+# Python / editor cruft
+**/__pycache__/
+**/*.pyc
+.vscode/
+.ropeproject/
+*.log

@@ -1,0 +1,50 @@
+# Ready-to-upload spec for Seqera Containers (https://seqera.io/containers).
+# Upload this, then pass the image it returns as BASE_IMAGE to docker/Dockerfile.
+#
+# This is the pinned counterpart to ../environment.yaml (which stays flexible for
+# local dev): the versions here are fixed, from one solve, so the image is
+# reproducible. When you bump versions, re-solve so they still install together.
+# The C++ header libs the build fetches (CLI11, fmt, simdjson, Taskflow, ZeroMQ,
+# HiGHS, slow5) are NOT conda packages and don't belong here.
+#
+# HiGHS-only: the container doesn't ship Gurobi (the conda package has no C
+# header, and the license is a hassle). Build freddie-core with Gurobi locally
+# instead, on a machine with a real Gurobi install (see the README).
+name: scfreddie
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  # build toolchain
+  - python=3.12.13
+  - cmake=3.31.8
+  - make=4.4.1
+  - cxx-compiler=1.11.0
+  - pkg-config=0.29.2
+  - git=2.55.0
+
+  # C++ link deps
+  - htslib=1.24
+  - zlib=1.3.2
+
+  # workflow + external tools
+  # NOTE: snakemake is NOT here — it's pip-installed in the Dockerfile. Its conda
+  # deps (conda-inject, configargparse, ...) don't resolve on the Seqera builder,
+  # but they're all on PyPI, so pip installs it cleanly.
+  - minimap2=2.31
+  - samtools=1.24
+  - flexiplex=1.02.6
+  - pigz=2.8           # decompression for the flexiplex/demux rules (pigz -dcf)
+
+  # Python analysis stack (doublet detection uses scanpy's own sc.pp.scrublet,
+  # so the standalone scrublet package — and its python-annoy dep — is not needed)
+  - pysam=0.24.0
+  - numpy=2.4.6
+  - scipy=1.18.0
+  - pandas=3.0.5
+  - scanpy=1.12.3       # brings scikit-learn, networkx, tqdm
+  - scikit-image=0.25.2 # scrublet's automatic threshold (sc.pp.scrublet); scanpy
+                        # does NOT pull it in — it's an optional dep
+  - python-igraph=0.11.8 # sc.tl.leiden(flavor="igraph"); optional scanpy dep
+  - anndata=0.13.2
+  - matplotlib=3.11.1

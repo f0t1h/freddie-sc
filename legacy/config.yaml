@@ -1,0 +1,38 @@
+outpath: /World/lrsc/analysis/freddie/output/
+
+gurobi:
+    license: ~/gurobi.lic
+    timeout: 1
+
+samples:
+    NOA_qm:
+      ref: Homo_sapiens
+      bc_wl: 10x
+      reads: /World/raw-data/PAF26132_pass_concat.fastq.gz
+
+    S1:
+        ref: Homo_sapiens_chr21
+        bc_wl: 10x
+        reads: /World/lrsc/analysis/freddie/output/simulate/TS/S1.fastq
+        truth: /World/lrsc/analysis/freddie/output/simulate/TS/S1.tsv
+    E1:
+        ref: Homo_sapiens
+        bc_wl: 10x
+        reads: /World/lrsc/analysis/freddie/output/simulate/TS/E1.fastq
+        truth: /World/lrsc/analysis/freddie/output/simulate/TS/E1.tsv
+    # N1:
+    #     ref: Homo_sapiens
+    #     reads: data/samples/N1.fastq
+    #     truth: /World/lrsc/analysis/freddie/output/simulate/TS/S1.tsv
+
+refs:
+    Homo_sapiens:
+        GTF : data/refs/homo_sapiens.annot.gtf
+        DNA : data/refs/homo_sapiens.dna.fa
+        cDNA : data/refs/homo_sapiens.cdna.fa
+    Homo_sapiens_chr21:
+        GTF: data/refs/homo_sapiens.chr21.annot.gtf
+        DNA: data/refs/homo_sapiens.chr21.dna.fa
+        cDNA: data/refs/homo_sapiens.chr21.cdna.fa
+    barcodes:
+        10x: data/refs/3M-february-2018.txt.gz

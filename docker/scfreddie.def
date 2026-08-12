@@ -1,0 +1,70 @@
+# Apptainer/Singularity image for scFreddie (HPC): the two compiled analysis tools
+# (freddie-core, putagene) on the Seqera Containers base from docker/seqera.yaml.
+# Snakemake and tksm2 are not here — Snakemake runs on the host, and simulation is
+# a separate workflow. No Docker needed. Run from the repo root, submodules in:
+#
+#   apptainer build scfreddie.sif docker/scfreddie.def
+#
+# If you're not in /etc/subuid, Apptainer wraps %post in fakeroot, which needs
+# getopt — absent from the minimal base. %post needs no real root, so skip it:
+#   apptainer build --ignore-fakeroot-command scfreddie.sif docker/scfreddie.def
+#
+# Regenerate the base when seqera.yaml changes and update the From: tag below.
+#
+# Use the tools (e.g. from host Snakemake rules):
+#   apptainer exec scfreddie.sif freddie-core --help
+#   apptainer exec scfreddie.sif putagene --help
+
+Bootstrap: oras
+From: community.wave.seqera.io/library/scfreddie:b327a6a3ad16bcb6
+
+%files
+    freddie-core /opt/scfreddie/freddie-core
+    sclr-putagene /opt/scfreddie/sclr-putagene
+
+%post
+    export PATH=/opt/conda/bin:$PATH CONDA_PREFIX=/opt/conda
+    # pigz decompresses the reads in the flexiplex/demux rules. It's in seqera.yaml
+    # now, but install it here too so an older base still works after a rebuild.
+    if ! command -v pigz >/dev/null 2>&1; then
+        micromamba install -y -p /opt/conda -c conda-forge pigz \
+          || conda install -y -p /opt/conda -c conda-forge pigz \
+          || echo "WARN: no pigz and no installer; regenerate the base from docker/seqera.yaml"
+    fi
+    # scikit-image: scanpy's sc.pp.scrublet needs it for automatic thresholding,
+    # but scanpy doesn't pull it in. In seqera.yaml now; install here for old bases.
+    if ! python -c "import skimage" >/dev/null 2>&1; then
+        micromamba install -y -p /opt/conda -c conda-forge scikit-image \
+          || conda install -y -p /opt/conda -c conda-forge scikit-image \
+          || echo "WARN: no scikit-image and no installer; regenerate the base from docker/seqera.yaml"
+    fi
+    # python-igraph: sc.tl.leiden(flavor="igraph") needs it; scanpy doesn't pull it
+    # in. In seqera.yaml now; install here for old bases.
+    if ! python -c "import igraph" >/dev/null 2>&1; then
+        micromamba install -y -p /opt/conda -c conda-forge python-igraph \
+          || conda install -y -p /opt/conda -c conda-forge python-igraph \
+          || echo "WARN: no python-igraph and no installer; regenerate the base from docker/seqera.yaml"
+    fi
+    cd /opt/scfreddie
+    # Drop any build trees copied from the host (they hold stale absolute paths).
+    rm -rf freddie-core/build freddie-core/build2 freddie-core/build-gurobi sclr-putagene/build
+    # -j4 keeps peak memory sane; bare -j would spawn unbounded jobs and OOM.
+    cmake -S freddie-core -B freddie-core/build && cmake --build freddie-core/build -j4
+    cmake -S sclr-putagene -B sclr-putagene/build && cmake --build sclr-putagene/build -j4
+    ln -sf /opt/scfreddie/freddie-core/build/freddie-core /opt/conda/bin/freddie-core
+    ln -sf /opt/scfreddie/sclr-putagene/build/putagene    /opt/conda/bin/putagene
+
+%environment
+    export PATH=/opt/conda/bin:$PATH
+    export CONDA_PREFIX=/opt/conda
+
+%runscript
+    exec "$@"
+
+%labels
+    org.scfreddie.description "freddie-core + putagene (single-cell long-read isoform discovery)"
+
+%help
+    scFreddie analysis tools (HiGHS solver). On PATH: freddie-core, putagene, plus
+    the base tools minimap2, samtools, flexiplex and the Python stack. Snakemake
+    and tksm2 are not included — run Snakemake on the host and call these binaries.

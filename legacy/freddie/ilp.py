@@ -430,7 +430,7 @@ class FredILP:
             solver=pulp.getSolver(
                 self.params.ilp_solver,
                 timeLimit=self.params.timeLimit,
-                threads=self.params.ilp_threads,
+                #                threads=self.params.ilp_threads,
                 msg=0,
             )
         )

@@ -1,33 +1,73 @@
-outpath: output/
+# putagene pipeline config (lives at the repo root, passed with --configfile)
+# Run from the project root:
+#   snakemake -s sclr-putagene/Snakefile --configfile config.yaml -j8
 
-gurobi:
-    license: ~/gurobi.lic
-    timeout: 1
+outpath: output/putagene
+# Where the simulation workflow (Simulate.smk) writes its outputs — used by the
+# eval rule to find sim truth TSVs and preprocessed refs.
+simulate_outpath: output/simulate
 
-samples:
-    S1:
-        ref: Homo_sapiens_chr21
-        bc_wl: 10x
-        reads: output/simulate/TS/S1.fastq
-        truth: output/simulate/TS/S1.tsv
-    E1:
-        ref: Homo_sapiens
-        bc_wl: 10x
-        reads: output/simulate/TS/E1.fastq
-        truth: output/simulate/TS/E1.tsv
-    # N1:
-    #     ref: Homo_sapiens
-    #     reads: data/samples/N1.fastq
-    #     truth: output/simulate/TS/S1.tsv
+# Tool locations. Empty -> resolved from PATH (else the run fails with a clear
+# error). Set to an absolute path (e.g. a build/ output) or a command name.
+binaries:
+    freddie-core:
+    putagene:
 
+# Apptainer image with freddie-core + putagene (the full scfreddie.sif built from
+# docker/scfreddie.def — NOT the Seqera base). Only used with the apptainer
+# profile (snakemake --workflow-profile profiles/apptainer ... --sdm apptainer).
+container:
+    image:
+
+# The sample list lives in a CSV (see samplesheet.csv), not here — this file is
+# just tool parameters and references. Swap sheets with --config samplesheet=...
+samplesheet: samplesheet.csv
+# ---------------------------------------------------------------------------
+# Reference genomes
+# ---------------------------------------------------------------------------
 refs:
-    Homo_sapiens:
-        GTF : data/refs/homo_sapiens.annot.gtf
-        DNA : data/refs/homo_sapiens.dna.fa
-        cDNA : data/refs/homo_sapiens.cdna.fa
-    Homo_sapiens_chr21:
-        GTF: data/refs/homo_sapiens.chr21.annot.gtf
-        DNA: data/refs/homo_sapiens.chr21.dna.fa
-        cDNA: data/refs/homo_sapiens.chr21.cdna.fa
-    barcodes:
-        10x: data/refs/3M-february-2018.txt.gz
+    GRCh38:
+        DNA: data/refs/homo_sapiens.dna.fa
+
+# ---------------------------------------------------------------------------
+# Tool parameters
+# ---------------------------------------------------------------------------
+flexiplex:
+    extra_discover: "" # extra flags for the discover pass (flexiplex -f 0)
+    extra_filter: "" # sim has 2500 known cells; auto-knee underflows at low coverage (use "" for real samples)
+    extra_extract: "" # extra flags for the extract pass (e.g. "-e 1")
+
+minimap2:
+    extra: "" # any extra minimap2 flags
+
+putagene:
+    merge: 20
+    cigar_max_del: 20
+    min_locus_reads: 3
+    min_mapq: 0
+    dedup: true
+    dedup_mode: longest # only "longest" supported
+    use_strand: false
+    cb_tag: CB
+    ub_tag: UB
+
+scanpy:
+    min_counts: 100
+    min_cells: 3
+    n_pcs: 30
+    resolution: 0.5
+    doublet: true # Scrublet doublet detection + removal
+    expected_doublet_rate: 0.05 # Scrublet --expected-doublet-rate
+
+freddie:
+    threads: 8
+    time_limit: 300
+    min_read_support: 3
+    max_problem_size: 50000
+    # Solver selection (freddie-core --frontend / --backend).
+    #   frontend: "internal" (the only compiled front-end)
+    #   backend:  "highs" (default) | "gurobi" | "cbc"
+    # The "gurobi" backend needs -DFREDDIE_ENABLE_GUROBI=ON at build time and a
+    # valid Gurobi license at runtime.
+    frontend: "internal"
+    backend: "highs"

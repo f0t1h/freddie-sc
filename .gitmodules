@@ -1,3 +1,9 @@
-[submodule "extern/tksm"]
-	path = extern/tksm
-	url = https://github.com/vpc-ccg/tksm
+[submodule "freddie-core"]
+	path = freddie-core
+	url = https://github.com/f0t1h/freddie-core
+[submodule "sclr-putagene"]
+	path = sclr-putagene
+	url = https://github.com/f0t1h/sclr-putagene
+[submodule "extern/tksm2"]
+	path = extern/tksm2
+	url = https://github.com/f0t1h/tksm2
